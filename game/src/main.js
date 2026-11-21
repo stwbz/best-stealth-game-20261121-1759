@@ -9,13 +9,17 @@
 import { BEST_KEY, STEP } from './config.js';
 import { createRandom } from './random.js';
 import { createWorld, EVENT_CAUGHT_ATTEMPT, EVENT_ESCAPED_FLAG, EVENT_FOOTSTEP, EVENT_LOSE, EVENT_SHARD, EVENT_SPOTTED_FLAG, EVENT_WIN } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, ACTION_RESTART, createInput } from './input.js';
+import { ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, ACTION_RESTART, createInput } from './input.js';
 import { createAudio } from './audio.js';
 import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE, SCREEN_WIN } from './render.js';
 import { stageShot } from './shots.js';
 
 /** The longest frame the loop catches up on; a longer stall is dropped. */
 const MAX_FRAME = 0.25;
+/** How far a guard's step carries, for the footstep sound and its pan. */
+const HEAR_STEPS = 420;
+/** Detection at which the meter turns suspicious and a tick sounds. */
+const SUSPICIOUS_AT = 0.45;
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
@@ -44,7 +48,8 @@ function saveBest(value) {
   }
 }
 
-function runShot(name) {
+/** A staged screenshot scene: paint it twice, then signal readiness. */
+function presentShot(name) {
   const scene = stageShot(name, world);
   let painted = 0;
   function paint() {
@@ -62,52 +67,59 @@ function runGame() {
   let best = readBest();
   let accumulator = 0;
   let last = performance.now();
+  let previousDetection = 0;
 
   // Screen readers (and anyone watching the page's text) hear the changes.
   function announce(message) {
     status.textContent = message;
   }
 
-  function startGame() {
+  function beginRun() {
     world.reset();
     accumulator = 0;
+    previousDetection = 0;
     screen = SCREEN_PLAY;
-    announce('Playing. Steal 3 lantern shards, then reach the green exit.');
+    announce('Playing. Three shards, then the green exit — unseen.');
   }
 
-  function endGame(won) {
+  function finishRun(won) {
     screen = won ? SCREEN_WIN : SCREEN_OVER;
     if (world.state.score > best) {
       best = world.state.score;
       saveBest(best);
     }
-    announce(won ? `Escaped unseen. Score ${world.state.score}.` : `Caught. Score ${world.state.score}.`);
+    announce(won ? `Out clean. Score ${world.state.score}.` : `Caught three times. Score ${world.state.score}.`);
   }
 
   function handleActions() {
     const actions = input.takeActions();
+    if (actions & ACTION_MUTE) {
+      const muted = audio.toggleMute();
+      announce(muted ? 'Muted.' : 'Sound on.');
+    }
     if (actions & ACTION_RESTART && screen !== SCREEN_TITLE) {
       audio.unlock();
-      startGame();
+      beginRun();
       return;
     }
     if (actions & ACTION_CONFIRM && screen !== SCREEN_PLAY && screen !== SCREEN_PAUSED) {
       audio.unlock();
-      startGame();
+      beginRun();
     } else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
       screen = SCREEN_PAUSED;
-      announce('Paused.');
+      announce('Paused. The guards wait.');
     } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
       screen = SCREEN_PLAY;
       announce('Playing.');
     }
   }
 
-  function react(events) {
+  /** Sounds and announcements for what just happened in the world. */
+  function reactTo(events) {
     if (events & EVENT_FOOTSTEP) audio.footstep(world.state.player.sneaking);
     if (events & EVENT_SHARD) {
       audio.pickup();
-      announce(`Shard ${world.state.shardsCollected} of 3.`);
+      announce(`Shard ${world.state.shardsCollected} of 3 pocketed.`);
     }
     if (events & EVENT_SPOTTED_FLAG) {
       audio.alertSting();
@@ -116,29 +128,38 @@ function runGame() {
     if (events & EVENT_ESCAPED_FLAG) announce('Lost them. Stay low.');
     if (events & EVENT_CAUGHT_ATTEMPT) {
       audio.caughtThud();
-      announce(`Caught! ${world.state.attemptsLeft} attempt${world.state.attemptsLeft === 1 ? '' : 's'} left. Back to the door.`);
+      const left = world.state.attemptsLeft;
+      announce(`Caught! ${left} attempt${left === 1 ? '' : 's'} left. Back to the door.`);
     }
     if (events & EVENT_WIN) {
       audio.winFanfare();
-      endGame(true);
+      finishRun(true);
     } else if (events & EVENT_LOSE) {
       audio.caughtThud();
-      endGame(false);
+      finishRun(false);
     }
   }
 
-  function step() {
+  /** One fixed step of play: move the world, then sound the guards. */
+  function advanceWorld() {
     const steering = input.steering();
     const events = world.step(STEP, steering);
-    // A guard's stride nearby is a footstep the player can hear.
+    const detection = world.state.guards.detection;
+    if (previousDetection <= SUSPICIOUS_AT && detection > SUSPICIOUS_AT) audio.suspicionTick();
+    previousDetection = detection;
+    // A guard's stride nearby is a footstep the thief can hear, panned
+    // toward the guard so the ears say which side it comes from.
     for (const guard of world.state.guards.guards) {
-      if (guard.stepped) {
-        guard.stepped = false;
-        const distance = Math.hypot(guard.x - world.state.player.x, guard.y - world.state.player.y);
-        if (distance < 420) audio.guardStep(distance);
+      if (!guard.stepped) continue;
+      guard.stepped = false;
+      const dx = guard.x - world.state.player.x;
+      const dy = guard.y - world.state.player.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance < HEAR_STEPS) {
+        audio.guardStep(distance, Math.max(-1, Math.min(1, dx / HEAR_STEPS)));
       }
     }
-    react(events);
+    reactTo(events);
   }
 
   function frame(now) {
@@ -148,7 +169,7 @@ function runGame() {
     handleActions();
     if (screen === SCREEN_PLAY) {
       while (accumulator >= STEP && screen === SCREEN_PLAY) {
-        step();
+        advanceWorld();
         accumulator -= STEP;
       }
     } else {
@@ -161,13 +182,13 @@ function runGame() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && screen === SCREEN_PLAY) {
       screen = SCREEN_PAUSED;
-      announce('Paused.');
+      announce('Paused. The guards wait.');
     }
   });
 
-  announce('Mothlight. Press Space or click to begin the heist.');
+  announce('Mothlight. Space or click to begin the heist.');
   requestAnimationFrame(frame);
 }
 
-if (shot) runShot(shot);
+if (shot) presentShot(shot);
 else runGame();

@@ -1,13 +1,16 @@
 // Sound, synthesised with WebAudio and nothing else: no audio files, no
-// network. Every sound is a short oscillator envelope, created on first use
-// (after a user gesture, so browsers allow it) and silent when audio is
-// unavailable — the game never depends on sound to be playable.
+// network, no samples to load. Every effect is one short oscillator voice
+// with an envelope, built on first use (after a gesture, so the browser
+// allows it) and silent whenever audio is unavailable — the game never
+// needs sound to be playable. Guard steps are panned left/right by where
+// the guard stands relative to the thief, so the ears say what the eyes
+// cannot: a guard is coming, and from which side.
 
 export function createAudio() {
   let context = null;
   let muted = false;
 
-  function ensure() {
+  function ensureContext() {
     if (context !== null) return context;
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -21,29 +24,51 @@ export function createAudio() {
 
   /** Call from any user gesture so the browser unlocks audio. */
   function unlock() {
-    const audio = ensure();
-    if (audio && audio.state === 'suspended') audio.resume().catch(() => {});
+    const audio = ensureContext();
+    if (audio !== null && audio.state === 'suspended') audio.resume().catch(() => {});
   }
 
-  function tone(frequency, duration, type, volume, slideTo) {
+  /**
+   * One voice: an oscillator through a gain envelope, optionally panned.
+   * `slideTo` glides the pitch; `pan` is -1 (left) to 1 (right). Any
+   * failure is swallowed — audio is decoration, never load-bearing.
+   */
+  function voice({ frequency, slideTo, duration, type, volume, pan }) {
     if (muted) return;
-    const audio = ensure();
+    const audio = ensureContext();
     if (audio === null) return;
     try {
       const oscillator = audio.createOscillator();
       const gain = audio.createGain();
+      const now = audio.currentTime;
       oscillator.type = type;
-      oscillator.frequency.setValueAtTime(frequency, audio.currentTime);
-      if (slideTo !== undefined) oscillator.frequency.exponentialRampToValueAtTime(slideTo, audio.currentTime + duration);
-      gain.gain.setValueAtTime(volume, audio.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + duration);
+      oscillator.frequency.setValueAtTime(frequency, now);
+      if (slideTo !== undefined) {
+        oscillator.frequency.exponentialRampToValueAtTime(slideTo, now + duration);
+      }
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
       oscillator.connect(gain);
-      gain.connect(audio.destination);
-      oscillator.start();
-      oscillator.stop(audio.currentTime + duration);
+      if (pan !== undefined && typeof audio.createStereoPanner === 'function') {
+        const panner = audio.createStereoPanner();
+        panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), now);
+        gain.connect(panner);
+        panner.connect(audio.destination);
+      } else {
+        gain.connect(audio.destination);
+      }
+      oscillator.start(now);
+      oscillator.stop(now + duration);
     } catch {
-      // Audio is decoration; a failure here must never break the game.
+      // A failed blip must never break the game.
     }
+  }
+
+  /** A note after `delayMs`, for the little win arpeggio. */
+  function later(frequency, delayMs) {
+    setTimeout(() => {
+      voice({ frequency, duration: 0.24, type: 'sine', volume: 0.08 });
+    }, delayMs);
   }
 
   return {
@@ -52,34 +77,49 @@ export function createAudio() {
       muted = !muted;
       return muted;
     },
-    /** Soft tick as the player walks; quieter and lower when sneaking. */
+    /** Soft tick as the thief walks; quieter and lower while sneaking. */
     footstep(sneaking) {
-      tone(sneaking ? 140 : 190, 0.05, 'triangle', sneaking ? 0.02 : 0.045);
+      voice({
+        frequency: sneaking ? 150 : 205,
+        duration: 0.05,
+        type: 'triangle',
+        volume: sneaking ? 0.02 : 0.04,
+      });
     },
-    /** A guard's boot nearby: lower, so it reads as someone else's step. */
-    guardStep(distance) {
-      const volume = Math.max(0.015, 0.09 * (1 - distance / 420));
-      tone(95, 0.07, 'sine', volume);
+    /**
+     * A guard's boot nearby: lower than the thief's step, panned toward
+     * the guard, louder the closer it is. `pan` is -1..1 by direction.
+     */
+    guardStep(distance, pan) {
+      voice({
+        frequency: 85,
+        duration: 0.08,
+        type: 'sine',
+        volume: Math.max(0.015, 0.085 * (1 - distance / 420)),
+        pan,
+      });
     },
-    /** Bright chime when a lantern shard is pocketed. */
+    /** Bright two-note chime when a lantern shard is pocketed. */
     pickup() {
-      tone(660, 0.12, 'sine', 0.09);
-      tone(990, 0.18, 'sine', 0.07, 1320);
+      voice({ frequency: 700, duration: 0.12, type: 'sine', volume: 0.09 });
+      voice({ frequency: 1050, slideTo: 1400, duration: 0.18, type: 'sine', volume: 0.07 });
+    },
+    /** One soft tick as the meter crosses into suspicious. */
+    suspicionTick() {
+      voice({ frequency: 520, duration: 0.07, type: 'triangle', volume: 0.05 });
     },
     /** Rising two-note sting when the alarm goes up. */
     alertSting() {
-      tone(220, 0.16, 'sawtooth', 0.08, 440);
-      tone(330, 0.22, 'sawtooth', 0.06, 660);
+      voice({ frequency: 240, slideTo: 480, duration: 0.16, type: 'sawtooth', volume: 0.07 });
+      voice({ frequency: 360, slideTo: 720, duration: 0.22, type: 'sawtooth', volume: 0.05 });
     },
-    /** Low thud when the player is caught. */
+    /** Low thud when the thief is caught. */
     caughtThud() {
-      tone(120, 0.3, 'sine', 0.12, 55);
+      voice({ frequency: 110, slideTo: 50, duration: 0.32, type: 'sine', volume: 0.12 });
     },
-    /** Little arpeggio when the player slips out unseen. */
+    /** Little rising arpeggio when the thief slips out unseen. */
     winFanfare() {
-      [523, 659, 784, 1047].forEach((frequency, index) => {
-        setTimeout(() => tone(frequency, 0.22, 'sine', 0.08), index * 110);
-      });
+      [587, 740, 880, 1175].forEach((frequency, index) => later(frequency, index * 110));
     },
   };
 }
