@@ -1,8 +1,9 @@
 // The level's geometry: walls and crates as rectangles, and the two
-// line-of-sight questions the stealth rules depend on. A guard's vision cone
-// is a fan of rays; each ray stops at the first wall or crate it hits, so
-// cover really does hide the player. All of it is pure geometry — no drawing
-// and no browser in here — so the world and the renderer share it.
+// line-of-sight questions the stealth rules depend on. A guard's vision
+// cone is a fan of rays; each ray stops at the first wall or crate it
+// hits, so cover really does hide the thief. All of it is pure geometry —
+// no drawing and no browser in here — so the world and the renderer share
+// it, and the Node sims can run the same rules the browser plays.
 
 import { CRATES, WALLS } from './config.js';
 
@@ -15,56 +16,61 @@ export function pointInRect(x, y, rect) {
 
 /** True when the point is inside any solid (a wall or a crate). */
 export function pointBlocked(x, y) {
-  for (const rect of SOLIDS) if (pointInRect(x, y, rect)) return true;
+  for (const rect of SOLIDS) {
+    if (pointInRect(x, y, rect)) return true;
+  }
   return false;
 }
 
 /**
+ * One axis of a slab test: the interval of ray parameters where the ray
+ * is inside [min, max] on this axis, or null when it never is. A ray
+ * parallel to the axis either rides inside the slab forever or misses it.
+ */
+function slabInterval(origin, direction, min, max) {
+  if (Math.abs(direction) < 1e-9) {
+    if (origin < min || origin > max) return null;
+    return [-Infinity, Infinity];
+  }
+  const enter = (min - origin) / direction;
+  const leave = (max - origin) / direction;
+  return enter <= leave ? [enter, leave] : [leave, enter];
+}
+
+/**
+ * Ray parameter where the ray from (x, y) along (dx, dy) first enters
+ * the rectangle, or null when it never does. The ray enters the box where
+ * both axes' intervals overlap; it leaves at the earliest exit.
+ */
+function rayEntersRect(x, y, dx, dy, rect) {
+  const xSlab = slabInterval(x, dx, rect.x, rect.x + rect.w);
+  if (xSlab === null) return null;
+  const ySlab = slabInterval(y, dy, rect.y, rect.y + rect.h);
+  if (ySlab === null) return null;
+  const enter = Math.max(xSlab[0], ySlab[0], 0);
+  const leave = Math.min(xSlab[1], ySlab[1]);
+  if (enter > leave) return null;
+  if (leave < 0) return null;
+  return enter;
+}
+
+/**
  * Distance along a ray from (x, y) in direction (dx, dy) to the first solid
- * it hits, or Infinity when it hits nothing within maxDistance. Slab test
- * per rectangle; the nearest hit wins.
+ * it hits, or Infinity when it hits nothing within maxDistance. The
+ * nearest hit wins.
  */
 export function rayDistance(x, y, dx, dy, maxDistance) {
   let best = Infinity;
   for (const rect of SOLIDS) {
-    const t = rayRect(x, y, dx, dy, rect);
-    if (t !== null && t < best && t <= maxDistance) best = t;
+    const hit = rayEntersRect(x, y, dx, dy, rect);
+    if (hit !== null && hit < best && hit <= maxDistance) best = hit;
   }
   return best;
 }
 
-function rayRect(x, y, dx, dy, rect) {
-  let tMin = 0;
-  let tMax = Infinity;
-  const mins = [rect.x, rect.y];
-  const maxs = [rect.x + rect.w, rect.y + rect.h];
-  const origins = [x, y];
-  const dirs = [dx, dy];
-  for (let axis = 0; axis < 2; axis += 1) {
-    const dir = dirs[axis];
-    const origin = origins[axis];
-    if (Math.abs(dir) < 1e-9) {
-      if (origin < mins[axis] || origin > maxs[axis]) return null;
-    } else {
-      let t1 = (mins[axis] - origin) / dir;
-      let t2 = (maxs[axis] - origin) / dir;
-      if (t1 > t2) {
-        const swap = t1;
-        t1 = t2;
-        t2 = swap;
-      }
-      if (t1 > tMin) tMin = t1;
-      if (t2 < tMax) tMax = t2;
-      if (tMin > tMax) return null;
-    }
-  }
-  if (tMax < 0) return null;
-  return tMin >= 0 ? tMin : 0;
-}
-
 /**
  * True when the straight segment from (x1, y1) to (x2, y2) is clear of every
- * solid — the guard can actually see the player, not just face their way.
+ * solid — the guard can actually see the thief, not just face their way.
  */
 export function hasLineOfSight(x1, y1, x2, y2) {
   const dx = x2 - x1;
@@ -78,7 +84,7 @@ export function hasLineOfSight(x1, y1, x2, y2) {
 /**
  * The vision cone as a polygon: the guard's eye plus one point per sampled
  * ray, each ray cut short by the first wall or crate it meets. The renderer
- * fills this polygon; the guards module tests the player against it.
+ * fills this polygon; the guards module tests the thief against it.
  */
 export function conePolygon(eyeX, eyeY, angle, range, halfAngle) {
   const points = [{ x: eyeX, y: eyeY }];
@@ -95,36 +101,41 @@ export function conePolygon(eyeX, eyeY, angle, range, halfAngle) {
 }
 
 /**
+ * Push a circle centre out of one rectangle, along the shortest way out:
+ * straight back from the nearest point on the rectangle, or, when the
+ * centre is inside it, out through the nearest face.
+ */
+function pushOutOfRect(x, y, r, rect) {
+  const closestX = Math.max(rect.x, Math.min(x, rect.x + rect.w));
+  const closestY = Math.max(rect.y, Math.min(y, rect.y + rect.h));
+  const ox = x - closestX;
+  const oy = y - closestY;
+  const distSq = ox * ox + oy * oy;
+  if (distSq >= r * r) return { x, y };
+  if (distSq > 1e-9) {
+    const dist = Math.sqrt(distSq);
+    return { x: closestX + (ox / dist) * r, y: closestY + (oy / dist) * r };
+  }
+  // Centre inside the rectangle: leave through the nearest face.
+  const toLeft = x - rect.x;
+  const toRight = rect.x + rect.w - x;
+  const toTop = y - rect.y;
+  const toBottom = rect.y + rect.h - y;
+  const smallest = Math.min(toLeft, toRight, toTop, toBottom);
+  if (smallest === toLeft) return { x: rect.x - r, y };
+  if (smallest === toRight) return { x: rect.x + rect.w + r, y };
+  if (smallest === toTop) return { x, y: rect.y - r };
+  return { x, y: rect.y + rect.h + r };
+}
+
+/**
  * Move a circle (centre x, y, radius r) by (dx, dy), sliding along solids
  * instead of passing through them. Returns the new centre.
  */
 export function moveCircle(x, y, r, dx, dy) {
-  let nextX = x + dx;
-  let nextY = y + dy;
+  let centre = { x: x + dx, y: y + dy };
   for (const rect of SOLIDS) {
-    const closestX = Math.max(rect.x, Math.min(nextX, rect.x + rect.w));
-    const closestY = Math.max(rect.y, Math.min(nextY, rect.y + rect.h));
-    const ox = nextX - closestX;
-    const oy = nextY - closestY;
-    const distSq = ox * ox + oy * oy;
-    if (distSq < r * r) {
-      if (distSq > 1e-9) {
-        const dist = Math.sqrt(distSq);
-        nextX = closestX + (ox / dist) * r;
-        nextY = closestY + (oy / dist) * r;
-      } else {
-        // Centre inside the rectangle: push out along the smallest overlap.
-        const left = nextX - rect.x;
-        const right = rect.x + rect.w - nextX;
-        const top = nextY - rect.y;
-        const bottom = rect.y + rect.h - nextY;
-        const min = Math.min(left, right, top, bottom);
-        if (min === left) nextX = rect.x - r;
-        else if (min === right) nextX = rect.x + rect.w + r;
-        else if (min === top) nextY = rect.y - r;
-        else nextY = rect.y + rect.h + r;
-      }
-    }
+    centre = pushOutOfRect(centre.x, centre.y, r, rect);
   }
-  return { x: nextX, y: nextY };
+  return centre;
 }

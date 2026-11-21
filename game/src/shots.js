@@ -27,34 +27,79 @@ const START_SECONDS = 6;
 const PLAY_SECONDS = 6.5;
 const ALERT_SECONDS = 30;
 
-function autopilot(world, routeIndex, bold) {
-  const player = world.state.player;
-  const target = ROUTE[Math.min(routeIndex, ROUTE.length - 1)];
-  const dx = target.x - player.x;
-  const dy = target.y - player.y;
-  const distance = Math.hypot(dx, dy);
-  const nearest = world.guards.nearestGuardDistance(player.x, player.y);
-  const sneaking = !bold && nearest < 250;
-  if (distance < 26) return { x: 0, y: 0, sneaking, arrived: true };
-  return { x: dx / distance, y: dy / distance, sneaking, arrived: false };
-}
-
-function runAutopilot(world, seconds, bold) {
-  let routeIndex = 0;
+/**
+ * Run the world forward for `seconds`, steering with `steer` each step.
+ * Stops early on a win, a loss, or a caught attempt.
+ */
+function drive(world, seconds, steer) {
   const steps = Math.round(seconds / STEP);
   for (let index = 0; index < steps; index += 1) {
-    const steering = autopilot(world, routeIndex, bold);
-    if (steering.arrived) routeIndex += 1;
-    const events = world.step(STEP, steering);
+    const events = world.step(STEP, steer());
     if (events & (EVENT_WIN | EVENT_LOSE | EVENT_CAUGHT_ATTEMPT)) break;
   }
 }
 
-function runPatrolOnly(world, seconds) {
-  const steps = Math.round(seconds / STEP);
-  for (let index = 0; index < steps; index += 1) {
-    world.step(STEP, { x: 0, y: 0, sneaking: false });
+/**
+ * A steering function that walks the route waypoint by waypoint, sneaking
+ * while a guard is close — unless `bold`, when it walks loud everywhere.
+ */
+function routePilot(world, route, bold) {
+  let routeIndex = 0;
+  return function steer() {
+    const player = world.state.player;
+    const target = route[Math.min(routeIndex, route.length - 1)];
+    const dx = target.x - player.x;
+    const dy = target.y - player.y;
+    const distance = Math.hypot(dx, dy);
+    const nearest = world.guards.nearestGuardDistance(player.x, player.y);
+    const sneaking = !bold && nearest < 250;
+    if (distance < 26) {
+      routeIndex += 1;
+      return { x: 0, y: 0, sneaking, arrived: true };
+    }
+    return { x: dx / distance, y: dy / distance, sneaking, arrived: false };
+  };
+}
+
+/** A steering function that stands still — guards patrol on their own. */
+function idlePilot() {
+  return { x: 0, y: 0, sneaking: false };
+}
+
+function stageAlert(world) {
+  // A bold run walks loud into the patrols: the meter fills, a guard
+  // gives chase, and the frame catches the alarm mid-flare.
+  drive(world, ALERT_SECONDS, routePilot(world, ROUTE, true));
+  const chasing = world.state.guards.guards.some((guard) => guard.mode === 'chase');
+  if (chasing) return;
+  // The bold run stayed lucky: stage the chase by hand instead — the
+  // thief caught in the open, the nearest guard bearing down on them.
+  const player = world.state.player;
+  player.x = 700;
+  player.y = 380;
+  player.sneaking = false;
+  let nearest = world.state.guards.guards[0];
+  for (const guard of world.state.guards.guards) {
+    const toGuard = Math.hypot(player.x - guard.x, player.y - guard.y);
+    const toNearest = Math.hypot(player.x - nearest.x, player.y - nearest.y);
+    if (toGuard < toNearest) nearest = guard;
   }
+  nearest.mode = GUARD_CHASE;
+  nearest.angle = Math.atan2(player.y - nearest.y, player.x - nearest.x);
+  world.state.guards.detection = 1;
+  world.state.guards.spotted = true;
+}
+
+function stageWin(world) {
+  drive(world, 8, idlePilot);
+  // The win screen over the level: every shard taken, thief at the door.
+  world.state.shardsTaken = SHARDS.map(() => true);
+  world.state.shardsCollected = SHARDS.length;
+  world.state.player.x = 1191;
+  world.state.player.y = 148;
+  world.state.elapsed = 94;
+  world.state.score = 300 + 292;
+  world.state.won = true;
 }
 
 /**
@@ -64,44 +109,17 @@ function runPatrolOnly(world, seconds) {
 export function stageShot(name, world) {
   world.reset();
   if (name === 'play') {
-    runAutopilot(world, PLAY_SECONDS, false);
+    drive(world, PLAY_SECONDS, routePilot(world, ROUTE, false));
     return { screen: SCREEN_PLAY, best: 0 };
   }
   if (name === 'alert') {
-    // A bold run walks loud into the patrols: the meter fills, a guard
-    // gives chase, and the frame catches the alarm mid-flare.
-    runAutopilot(world, ALERT_SECONDS, true);
-    const chasing = world.state.guards.guards.some((guard) => guard.mode === 'chase');
-    if (!chasing) {
-      // The bold run stayed lucky: stage the chase by hand instead — the
-      // thief caught in the open, the nearest guard bearing down on them.
-      const player = world.state.player;
-      player.x = 700;
-      player.y = 380;
-      player.sneaking = false;
-      let nearest = world.state.guards.guards[0];
-      for (const guard of world.state.guards.guards) {
-        if (Math.hypot(player.x - guard.x, player.y - guard.y) < Math.hypot(player.x - nearest.x, player.y - nearest.y)) nearest = guard;
-      }
-      nearest.mode = GUARD_CHASE;
-      nearest.angle = Math.atan2(player.y - nearest.y, player.x - nearest.x);
-      world.state.guards.detection = 1;
-      world.state.guards.spotted = true;
-    }
+    stageAlert(world);
     return { screen: SCREEN_PLAY, best: 0 };
   }
   if (name === 'end') {
-    runPatrolOnly(world, 8);
-    // The win screen over the level: every shard taken, thief at the door.
-    world.state.shardsTaken = SHARDS.map(() => true);
-    world.state.shardsCollected = SHARDS.length;
-    world.state.player.x = 1191;
-    world.state.player.y = 148;
-    world.state.elapsed = 94;
-    world.state.score = 300 + 292;
-    world.state.won = true;
+    stageWin(world);
     return { screen: SCREEN_WIN, best: 592 };
   }
-  runPatrolOnly(world, START_SECONDS);
+  drive(world, START_SECONDS, idlePilot);
   return { screen: SCREEN_TITLE, best: 0 };
 }
