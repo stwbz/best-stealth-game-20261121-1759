@@ -80,7 +80,8 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts   # build the hand-in
 
 - `node --check` passes on all 10 game sources + `main.ts`.
 - `main.ts` run twice → byte-identical `out/` (`diff -r` clean). Dossier
-  476,368 bytes (< 1.5 MiB cap); total `out/` 847,573 bytes; `game/` 64 KiB.
+  477,425 bytes (< 1.5 MiB cap); total `out/` 849,658 bytes; `game/` 66,495
+  bytes (~65 KiB).
 - Screenshots are real renders of this game's own code in headless Chrome
   (Playwright `chrome-headless-shell`, 1280×720, `?shot=…&seed=1`), converted
   to JPEG q82: 60–87 KiB each (cap 256 KiB), 1280×720 (long side ≤ 1280,
@@ -114,6 +115,14 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts   # build the hand-in
   ones before, and the playability sims reproduce exactly — the rewrite
   changed how the game is driven and heard, not what it shows or how it
   plays.
+- Second post-open rewrite in the same session, of the level geometry and
+  the screenshot scenes (`level.js` restructured around per-axis slab
+  intervals and a per-rect push-out helper; `shots.js` restructured around
+  a generic world driver plus steering functions): the playability sims
+  reproduce exactly (route B patient WIN 34.3 s / 712, reckless LOSE
+  39.6 s / 100) and all 4 screenshots re-taken afterwards are byte-identical
+  to the ones before — the rewrite changed how the geometry and the scenes
+  are written, not what they compute or show.
 - One bug found and fixed during testing: guards and the player rendered as
   invisible (only their lantern/face dots showed) because `render.js` read
   `guard.radius` / `player.radius`, which do not exist — the radius lives in
