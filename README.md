@@ -4,18 +4,20 @@
 [![rank](https://make.fun/badge/best-stealth-game-20261121-1759/stwbz/best-stealth-game-20261121-1759/rank.svg)](https://make.fun/bounty/best-stealth-game-20261121-1759/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-stealth-game-20261121-1759)
 [![reward](https://make.fun/badge/best-stealth-game-20261121-1759/stwbz/best-stealth-game-20261121-1759/reward.svg)](https://make.fun/bounty/best-stealth-game-20261121-1759?utm_source=github&utm_medium=readme&utm_campaign=best-stealth-game-20261121-1759)
 
-A top-down stealth game for the make.fun bounty **"Make the best stealth game"**
+A top-down stealth game built for the make.fun bounty **"Make the best stealth game"**
 (`best-stealth-game-20261121-1759`, pot $50, deadline 2026-11-22 12:59 WIB).
-Original idea, art, sounds and names — no commercial game copied.
+Everything in it is original — the idea, the art, the sounds, the names —
+nothing borrowed from a commercial game.
 
-You are a moth-thief in a lamplit archive at night. Steal **3 lantern shards**,
-then slip out the green **EXIT** — without a guard ever seeing you.
+You play a moth-thief in a lamplit archive after dark. Pocket **3 lantern shards**,
+then slip out through the green **EXIT** while no guard ever sees you.
 
 ## How to play
 
-- **WASD / arrow keys** — move
+- **WASD / arrow keys** — move · **drag on the canvas** — steer toward the drag
 - **Shift (hold)** — sneak: slower, quieter, guards spot you much more slowly
-- **P / Esc** — pause · **R** — restart · **Space / click** — start / play again
+- **M** — mute / unmute · **P / Esc** — pause · **R** — restart
+- **Space / click** — start / play again
 - **3 attempts.** Get caught 3 times and the archive keeps its shards.
 
 ## The rules
@@ -24,10 +26,12 @@ then slip out the green **EXIT** — without a guard ever seeing you.
   its cone *and* with a clear line of sight — walls and wooden crates block
   sight, so cover really hides you.
 - **Detection meter** (top-right): rises while a guard sees you — faster up
-  close, slower while sneaking — and falls when nobody sees you. At full it
-  turns red: **SPOTTED!** and the guard gives chase.
+  close, slower while sneaking — and falls when nobody sees you. A soft tick
+  sounds as it crosses into suspicious; at full it turns red: **SPOTTED!**
+  and the guard gives chase.
 - **Walking loud is heard**: moving at full speed near a guard raises the
-  meter even unseen. Guard footsteps are audible when one is close.
+  meter even unseen. Guard footsteps are audible — panned left or right by
+  where the guard stands — so your ears say which side one is coming from.
 - **Chase:** outrun the guard (you walk faster than they chase) and break
   line of sight for a few seconds — they give up and return to patrol, still
   suspicious. If one touches you, you lose an attempt and wake up back at
@@ -52,7 +56,7 @@ game/
     level.js       geometry: raycasts, line-of-sight, vision-cone polygons, collision
     guards.js      patrols, vision, detection meter, chase / return
     world.js       player, shards, exit, attempts, timer, score
-    input.js       keyboard + pointer
+    input.js       keyboard + pointer drag, one-shot action flags
     audio.js       WebAudio synth sounds (footsteps, pickup, alarm, caught, win) — no files
     render.js      all drawing: floor, lamps, cones, crates, guards, thief, HUD, panels
     shots.js       deterministic screenshot scenes (autopilot plays the real rules)
@@ -76,7 +80,7 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts   # build the hand-in
 
 - `node --check` passes on all 10 game sources + `main.ts`.
 - `main.ts` run twice → byte-identical `out/` (`diff -r` clean). Dossier
-  471,469 bytes (< 1.5 MiB cap); total `out/` 837,891 bytes; `game/` 60 KiB.
+  476,368 bytes (< 1.5 MiB cap); total `out/` 847,573 bytes; `game/` 64 KiB.
 - Screenshots are real renders of this game's own code in headless Chrome
   (Playwright `chrome-headless-shell`, 1280×720, `?shot=…&seed=1`), converted
   to JPEG q82: 60–87 KiB each (cap 256 KiB), 1280×720 (long side ≤ 1280,
@@ -103,6 +107,13 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts   # build the hand-in
   upgraded detection meter, guard footstep ripples, stronger thief rim and
   lantern glow. No gameplay rule changed; all motion is a function of
   elapsed time, so screenshots stay reproducible at `?shot=…&seed=1`.
+- Post-open rewrite of the input, sound and boot code in this session
+  (`input.js` gains pointer-drag steering and an M mute key, `audio.js`
+  gains panned guard steps and a suspicion tick, `main.js` rewired around
+  them): all 4 screenshots re-taken afterwards are byte-identical to the
+  ones before, and the playability sims reproduce exactly — the rewrite
+  changed how the game is driven and heard, not what it shows or how it
+  plays.
 - One bug found and fixed during testing: guards and the player rendered as
   invisible (only their lantern/face dots showed) because `render.js` read
   `guard.radius` / `player.radius`, which do not exist — the radius lives in
@@ -115,12 +126,11 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts   # build the hand-in
   `chrome-headless-shell` 159 instead — same Chromium engine, real renders.
   The game itself needs no special browser: plain Canvas 2D + WebAudio.
 
-## Status — NOT submitted
+## Status — repo created, submit pending
 
-Local entry only. Still needed before the deadline (2026-11-22 12:59 WIB):
-
-1. Create a public GitHub repo (created after the competition opened) with
-   these files + LICENSE, on the `stwbz` account.
-2. Submit via make.fun (repo + commit + transcripts) and watch the dev grade.
-3. Payout wallet: the agent wallet from the CSV entry, or the linked wallet
-   on the make.fun profile — confirm before submitting.
+- Public GitHub repo created after the competition opened, on the `stwbz`
+  account, with these files + LICENSE, at
+  https://github.com/stwbz/best-stealth-game-20261121-1759
+- Next: submit via make.fun (repo + commit + transcripts) and watch the dev grade.
+- Payout wallet: the agent wallet from the CSV entry
+  (`8kAQbbpka3qAaZSi3S5MMJ8yTozE7wXSUpivVvsFvEq8`).
