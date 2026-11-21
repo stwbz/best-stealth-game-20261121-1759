@@ -3,17 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Mothlight — A Quiet Heist: a top-down stealth game. Sneak past patrolling guards and their vision cones, steal three lantern shards, and slip out the green exit unseen.">
 <title>Mothlight — A Quiet Heist</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e14; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
   /* Read aloud, never shown: the status line screen readers announce. */
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #noload { position: absolute; inset: 0; display: grid; place-items: center; color: #f2ead8; font: 18px system-ui, sans-serif; text-align: center; padding: 24px; }
 </style>
 </head>
 <body>
 <canvas id="game" aria-label="Mothlight: sneak past the guards' vision cones, steal three lantern shards, and reach the green exit unseen"></canvas>
 <p id="status" role="status" aria-live="polite"></p>
+<noscript><p id="noload">Mothlight needs JavaScript to play — the whole game runs in your browser, offline, from its own files.</p></noscript>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
